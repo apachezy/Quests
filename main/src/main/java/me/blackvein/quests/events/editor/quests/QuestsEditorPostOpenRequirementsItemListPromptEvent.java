@@ -10,32 +10,25 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *******************************************************************************************************/
 
-package me.blackvein.quests.events.command;
+package me.blackvein.quests.events.editor.quests;
 
-import org.bukkit.event.Cancellable;
+import org.bukkit.conversations.ConversationContext;
 import org.bukkit.event.HandlerList;
 
-import me.blackvein.quests.Quester;
+import me.blackvein.quests.QuestFactory;
 
-/**
- * Called when the /quests journal command is run by a player
- */
-public class QuestsCommandPreQuestsJournalEvent extends QuestsCommandEvent implements Cancellable {
+public class QuestsEditorPostOpenRequirementsItemListPromptEvent extends QuestsEditorEvent {
     private static final HandlerList handlers = new HandlerList();
-    private boolean cancel = false;
+    private final QuestFactory factory;
 
-    public QuestsCommandPreQuestsJournalEvent(Quester quester) {
-        super(quester);
+    public QuestsEditorPostOpenRequirementsItemListPromptEvent(QuestFactory factory, ConversationContext context) {
+        super(context);
+        this.context = context;
+        this.factory = factory;
     }
     
-    @Override
-    public boolean isCancelled() {
-        return cancel;
-    }
-
-    @Override
-    public void setCancelled(boolean cancel) {
-        this.cancel = cancel;
+    public QuestFactory getQuestFactory() {
+        return factory;
     }
 
     @Override
