@@ -16,6 +16,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -27,7 +28,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
@@ -74,6 +77,7 @@ public class Quester {
     private UUID id;
     protected String questToTake;
     protected int questPoints = 0;
+    private String compassTargetQuestId;
     protected ConcurrentHashMap<Integer, Quest> timers = new ConcurrentHashMap<Integer, Quest>();
     protected ConcurrentHashMap<Quest, Integer> currentQuests = new ConcurrentHashMap<Quest, Integer>() {
 
@@ -252,6 +256,24 @@ public class Quester {
     public void setQuestPoints(int questPoints) {
         this.questPoints = questPoints;
     }
+    
+    /**
+     * Get compass target quest. Returns null if not set
+     * 
+     * @return Quest or null
+     */
+    public Quest getCompassTarget() {
+        return compassTargetQuestId != null ? plugin.getQuestById(compassTargetQuestId) : null;
+    }
+    
+    /**
+     * Set compass target quest. Does not update in-game
+     * 
+     * @param quest The target quest
+     */
+    public void setCompassTarget(Quest quest) {
+        compassTargetQuestId = quest.getId();
+    }
 
     public ConcurrentHashMap<Integer, Quest> getTimers() {
         return timers;
@@ -330,7 +352,10 @@ public class Quester {
     public void updateJournal() {
         if (!hasJournal) {
             return;
-        }  
+        } 
+        if (getPlayer() == null) {
+            return;
+        }
         if (!getPlayer().isOnline()) {
             plugin.getLogger().info("Could not update Quests Journal for " + getPlayer().getName() + " while offline");
             return;
@@ -359,7 +384,10 @@ public class Quester {
                 int currentLength = 0;
                 int currentLines = 0;
                 String page = "";
-                for (Quest quest : currentQuests.keySet()) {
+                List<Quest> sortedList = currentQuests.keySet().stream()
+                        .sorted(Comparator.comparing(Quest::getName))
+                        .collect(Collectors.toList());
+                for (Quest quest : sortedList) {
                     if ((currentLength + quest.getName().length() > 240) || (currentLines 
                             + ((quest.getName().length() % 19) == 0 ? (quest.getName().length() / 19) 
                             : ((quest.getName().length() / 19) + 1))) > 13) {
@@ -373,8 +401,8 @@ public class Quester {
                         currentLength += quest.getName().length();
                         currentLines += (quest.getName().length() / 19);
                     }
-                    if (getObjectives(quest, false) != null) {
-                        for (String obj : getObjectives(quest, false)) {
+                    if (getCurrentObjectives(quest, false) != null) {
+                        for (String obj : getCurrentObjectives(quest, false)) {
                             // Length/Line check
                             if ((currentLength + obj.length() > 240) || (currentLines + ((obj.length() % 19) 
                                     == 0 ? (obj.length() / 19) : ((obj.length() / 19) + 1))) > 13) {
@@ -571,21 +599,56 @@ public class Quester {
         }
     }
     
+    /**
+     * End a quest for this Quester
+     * 
+     * @param quest The quest to start
+     * @param message Message to inform player, can be left null or empty
+     * @since 3.8.6
+     */
+    public void quitQuest(Quest quest, String message) {
+        quitQuest(quest, new String[] {message});
+    }
+    
+    /**
+     * End a quest for this Quester
+     * 
+     * @param quest The quest to start
+     * @param messages Messages to inform player, can be left null or empty
+     * @since 3.8.6
+     */
+    public void quitQuest(Quest quest, String[] messages) {
+        if (quest == null) {
+            return;
+        }
+        hardQuit(quest);
+        for (String message : messages) {
+            if (message != null && !message.equals("") && getPlayer().isOnline()) {
+                getPlayer().sendMessage(message);
+            }
+        }
+        saveData();
+        loadData();
+        updateJournal();
+    }
+    
     public LinkedList<String> getCurrentRequirements(Quest quest, boolean ignoreOverrides) {
         if (quest == null) {
             return new LinkedList<String>();
         }
         Requirements reqs = quest.getRequirements();
         if (!ignoreOverrides) {
-            if (reqs.getFailRequirements() != null) {
+            if (reqs.getDetailsOverride() != null) {
                 LinkedList<String> requirements = new LinkedList<String>();
-                String message = ChatColor.RED + ConfigUtil.parseString(
-                        ChatColor.translateAlternateColorCodes('&', reqs.getFailRequirements()), 
-                        quest, getPlayer());
-                if (plugin.getDependencies().getPlaceholderApi() != null) {
-                    message = PlaceholderAPI.setPlaceholders(getPlayer(), message);
+                for (String s : reqs.getDetailsOverride()) {
+                    String message = ChatColor.RED + ConfigUtil.parseString(
+                            ChatColor.translateAlternateColorCodes('&', s), quest, getPlayer());
+                    if (plugin.getDependencies().getPlaceholderApi() != null) {
+                        message = PlaceholderAPI.setPlaceholders(getPlayer(), message);
+                    }
+                    requirements.add(message);
+                    
                 }
-                requirements.add(message);
                 return requirements;
             }
         }
@@ -594,11 +657,12 @@ public class Quester {
         LinkedList<String> requirements = new LinkedList<String>();
         OfflinePlayer player = getPlayer();
         if (reqs.getMoney() > 0) {
+            String currency = plugin.getDependencies().getCurrency(reqs.getMoney() == 1 ? false : true);
             if (plugin.getDependencies().getVaultEconomy() != null
                     && plugin.getDependencies().getVaultEconomy().getBalance(player) >= reqs.getMoney()) {
-                unfinishedRequirements.add(ChatColor.GREEN + "" + reqs.getMoney() + " " + Lang.get("money"));
+                unfinishedRequirements.add(ChatColor.GREEN + "" + reqs.getMoney() + " " + currency);
             } else {
-                finishedRequirements.add(ChatColor.GRAY + "" + reqs.getMoney() + " " + Lang.get("money"));
+                finishedRequirements.add(ChatColor.GRAY + "" + reqs.getMoney() + " " + currency);
             }
         }
         if (reqs.getQuestPoints() > 0) {
@@ -708,15 +772,16 @@ public class Quester {
     public LinkedList<String> getCurrentObjectives(Quest quest, boolean ignoreOverrides) {
         if (!ignoreOverrides) {
             if (getCurrentStage(quest) != null) {
-                if (getCurrentStage(quest).objectiveOverride != null) {
+                if (getCurrentStage(quest).objectiveOverrides.isEmpty() == false) {
                     LinkedList<String> objectives = new LinkedList<String>();
-                    String message = ChatColor.GREEN + ConfigUtil.parseString(
-                            ChatColor.translateAlternateColorCodes('&', getCurrentStage(quest).objectiveOverride), 
-                            quest, getPlayer());
-                    if (plugin.getDependencies().getPlaceholderApi() != null) {
-                        message = PlaceholderAPI.setPlaceholders(getPlayer(), message);
+                    for (String s: getCurrentStage(quest).objectiveOverrides) {
+                        String message = ChatColor.GREEN + ConfigUtil.parseString(
+                                ChatColor.translateAlternateColorCodes('&', s), quest, getPlayer());
+                        if (plugin.getDependencies().getPlaceholderApi() != null) {
+                            message = PlaceholderAPI.setPlaceholders(getPlayer(), message);
+                        }
+                        objectives.add(message);
                     }
-                    objectives.add(message);
                     return objectives;
                 }
             }
@@ -962,12 +1027,12 @@ public class Quester {
             if (delivered < toDeliver) {
                 String obj = Lang.get(getPlayer(), "deliver");
                 obj = obj.replace("<item>", ItemUtil.getName(is) + ChatColor.GREEN);
-                obj = obj.replace("<npc>", plugin.getNPCName(npc));
+                obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(npc));
                 unfinishedObjectives.add(ChatColor.GREEN + obj + ": " + delivered + "/" + toDeliver);
             } else {
                 String obj = Lang.get(getPlayer(), "deliver");
                 obj = obj.replace("<item>", ItemUtil.getName(is) + ChatColor.GRAY);
-                obj = obj.replace("<npc>", plugin.getNPCName(npc));
+                obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(npc));
                 finishedObjectives.add(ChatColor.GRAY + obj + ": " + delivered + "/" + toDeliver);
             }
         }
@@ -976,11 +1041,11 @@ public class Quester {
                 if (e.getKey().equals(n)) {
                     if (e.getValue() == false) {
                         String obj = Lang.get(getPlayer(), "talkTo");
-                        obj = obj.replace("<npc>", plugin.getNPCName(n));
+                        obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(n));
                         unfinishedObjectives.add(ChatColor.GREEN + obj);
                     } else {
                         String obj = Lang.get(getPlayer(), "talkTo");
-                        obj = obj.replace("<npc>", plugin.getNPCName(n));
+                        obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(n));
                         finishedObjectives.add(ChatColor.GRAY + obj);
                     }
                 }
@@ -996,16 +1061,16 @@ public class Quester {
                                 < getCurrentStage(quest).citizenNumToKill.get(getCurrentStage(quest).citizensToKill
                                 .indexOf(n))) {
                             unfinishedObjectives.add(ChatColor.GREEN + Lang.get(getPlayer(), "kill") + " " 
-                                    + plugin.getNPCName(n) + ChatColor.GREEN + " " + getQuestData(quest)
-                                    .citizenNumKilled.get(getCurrentStage(quest).citizensToKill.indexOf(n)) + "/" 
-                                    + getCurrentStage(quest).citizenNumToKill.get(getCurrentStage(quest).citizensToKill
-                                    .indexOf(n)));
+                                    + plugin.getDependencies().getNPCName(n) + ChatColor.GREEN + " " 
+                                    + getQuestData(quest).citizenNumKilled.get(getCurrentStage(quest).citizensToKill
+                                    .indexOf(n)) + "/" + getCurrentStage(quest).citizenNumToKill
+                                    .get(getCurrentStage(quest).citizensToKill.indexOf(n)));
                         } else {
                             finishedObjectives.add(ChatColor.GRAY + Lang.get(getPlayer(), "kill") + " " 
-                                    + plugin.getNPCName(n) + ChatColor.GRAY + " " + getCurrentStage(quest)
-                                    .citizenNumToKill.get(getCurrentStage(quest).citizensToKill.indexOf(n)) + "/" 
+                                    + plugin.getDependencies().getNPCName(n) + ChatColor.GRAY + " " 
                                     + getCurrentStage(quest).citizenNumToKill.get(getCurrentStage(quest).citizensToKill
-                                    .indexOf(n)));
+                                    .indexOf(n)) + "/" + getCurrentStage(quest).citizenNumToKill
+                                    .get(getCurrentStage(quest).citizensToKill.indexOf(n)));
                         }
                     }
                 }
@@ -1152,6 +1217,9 @@ public class Quester {
      * @return true if quest contains specified objective
      */
     public boolean containsObjective(Quest quest, String s) {
+        if (quest == null || getCurrentStage(quest) == null) {
+            return false;
+        }
         return getCurrentStage(quest).containsObjective(s);
     }
 
@@ -2161,22 +2229,23 @@ public class Quester {
             Enchantment enchantment, EntityType mob, String extra, NPC npc, Location location, DyeColor color, 
             String pass, CustomObjective co) {
         Player p = getPlayer();
-        if (getCurrentStage(quest).objectiveOverride != null) {
-            String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " 
-                    + ConfigUtil.parseString(ChatColor.translateAlternateColorCodes('&', 
-                    getCurrentStage(quest).objectiveOverride), quest, p);
-            if (plugin.getDependencies().getPlaceholderApi() != null) {
-                message = PlaceholderAPI.setPlaceholders(p, message);
+        if (getCurrentStage(quest).objectiveOverrides.isEmpty() == false) {
+            for (String s: getCurrentStage(quest).objectiveOverrides) {
+                String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " 
+                        + ConfigUtil.parseString(ChatColor.translateAlternateColorCodes('&', s), quest, p);
+                if (plugin.getDependencies().getPlaceholderApi() != null) {
+                    message = PlaceholderAPI.setPlaceholders(p, message);
+                }
+                p.sendMessage(message);
             }
-            p.sendMessage(message);
         } else if (objective.equalsIgnoreCase("password")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + pass;
             p.sendMessage(message);
         } else if (objective.equalsIgnoreCase("breakBlock")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "break") + " <item>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment)));
@@ -2185,8 +2254,8 @@ public class Quester {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "damage") 
                     + " <item>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment)));
@@ -2194,8 +2263,8 @@ public class Quester {
         } else if (objective.equalsIgnoreCase("placeBlock")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "place") + " <item>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment)));
@@ -2203,8 +2272,8 @@ public class Quester {
         } else if (objective.equalsIgnoreCase("useBlock")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "use") + " <item>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment)));
@@ -2212,8 +2281,8 @@ public class Quester {
         } else if (objective.equalsIgnoreCase("cutBlock")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "cut") + " <item>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment)));
@@ -2222,8 +2291,8 @@ public class Quester {
             ItemStack is = getCurrentStage(quest).itemsToCraft.get(getCurrentStage(quest).itemsToCraft.indexOf(goal));
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "craft") + " <item> "
                     + is.getAmount() + "/" + is.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, goal.getType(), goal.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(is)));
@@ -2232,8 +2301,8 @@ public class Quester {
             ItemStack is = getCurrentStage(quest).itemsToSmelt.get(getCurrentStage(quest).itemsToSmelt.indexOf(goal));
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "smelt") + " <item> "
                     + is.getAmount() + "/" + is.getAmount();
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, goal.getType(), goal.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(is)));
@@ -2249,8 +2318,8 @@ public class Quester {
                     break;
                 }
             }
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, increment.getType(), increment.getDurability(), ench);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(increment))
@@ -2260,8 +2329,8 @@ public class Quester {
             ItemStack is = getCurrentStage(quest).itemsToBrew.get(getCurrentStage(quest).itemsToBrew.indexOf(goal));
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "brew") + " <item> "
                     + is.getAmount() + "/" + is.getAmount();
-            if (plugin.getSettings().canTranslateItems() && goal.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, goal.getType(), goal.getDurability(), null, 
                         goal.getItemMeta());
             } else {
@@ -2269,13 +2338,13 @@ public class Quester {
             }
         } else if (objective.equalsIgnoreCase("deliverItem")) {
             String obj = Lang.get(p, "deliver");
-            obj = obj.replace("<npc>", plugin.getNPCName(getCurrentStage(quest).itemDeliveryTargets
+            obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(getCurrentStage(quest).itemDeliveryTargets
                     .get(getCurrentStage(quest).itemsToDeliver.indexOf(goal))));
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + obj;
             ItemStack is = getCurrentStage(quest).itemsToDeliver.get(getCurrentStage(quest).itemsToDeliver
                     .indexOf(goal));
-            if (plugin.getSettings().canTranslateItems() && !increment.hasItemMeta() 
-                    && !increment.getItemMeta().hasDisplayName()) {
+            if (plugin.getSettings().canTranslateNames() && !goal.hasItemMeta() 
+                    && !goal.getItemMeta().hasDisplayName()) {
                 plugin.getLocaleQuery().sendMessage(p, message, is.getType(), is.getDurability(), null);
             } else {
                 p.sendMessage(message.replace("<item>", ItemUtil.getName(is)));
@@ -2291,7 +2360,7 @@ public class Quester {
         } else if (objective.equalsIgnoreCase("killMob")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "kill") + " <mob>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems()) {
+            if (plugin.getSettings().canTranslateNames()) {
                 plugin.getLocaleQuery().sendMessage(p, message, mob, extra);
             } else {
                 p.sendMessage(message.replace("<mob>", MiscUtil.getProperMobName(mob)));
@@ -2302,7 +2371,7 @@ public class Quester {
             p.sendMessage(message);
         } else if (objective.equalsIgnoreCase("talkToNPC")) {
             String obj = Lang.get(p, "talkTo");
-            obj = obj.replace("<npc>", plugin.getNPCName(npc.getId()));
+            obj = obj.replace("<npc>", plugin.getDependencies().getNPCName(npc.getId()));
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + obj;
             p.sendMessage(message);
         } else if (objective.equalsIgnoreCase("killNPC")) {
@@ -2313,7 +2382,7 @@ public class Quester {
         } else if (objective.equalsIgnoreCase("tameMob")) {
             String message = ChatColor.GREEN + "(" + Lang.get(p, "completed") + ") " + Lang.get(p, "tame") + " <mob>";
             message = message + " " + goal.getAmount() + "/" + goal.getAmount();
-            if (plugin.getSettings().canTranslateItems()) {
+            if (plugin.getSettings().canTranslateNames()) {
                 plugin.getLocaleQuery().sendMessage(p, message, mob, extra);
             } else {
                 p.sendMessage(message.replace("<mob>", MiscUtil.getProperMobName(mob)));
@@ -3127,8 +3196,8 @@ public class Quester {
                             LinkedList<Location> locations = new LinkedList<Location>();
                             List<Integer> radii = questSec.getIntegerList("mob-kill-location-radii");
                             for (String loc : questSec.getStringList("mob-kill-locations")) {
-                                if (Quests.getLocation(loc) != null) {
-                                    locations.add(Quests.getLocation(loc));
+                                if (ConfigUtil.getLocation(loc) != null) {
+                                    locations.add(ConfigUtil.getLocation(loc));
                                 }
                             }
                             getQuestData(quest).locationsToKillWithin = locations;
@@ -3186,8 +3255,8 @@ public class Quester {
                     }
                     List<Integer> radii = questSec.getIntegerList("radii-to-reach-within");
                     for (String loc : questSec.getStringList("locations-to-reach")) {
-                        if (Quests.getLocation(loc) != null) {
-                            locations.add(Quests.getLocation(loc));
+                        if (ConfigUtil.getLocation(loc) != null) {
+                            locations.add(ConfigUtil.getLocation(loc));
                         }
                     }
                     getQuestData(quest).locationsReached = locations;
@@ -3347,6 +3416,7 @@ public class Quester {
 
     /**
      * Show an inventory GUI with quest items to the specified player
+     * 
      * @param npc The NPC from which the GUI is bound
      * @param quests List of quests to use for displaying items
      */
@@ -3360,23 +3430,26 @@ public class Quester {
             return;
         }
         Player player = getPlayer();
-        int size = ((quests.size() / 9) + 1) * 9;
-        Inventory inv = plugin.getServer().createInventory(player, size, Lang.get(player, "quests") + " | " 
-                + npc.getName());
-        int inc = 0;
-        for (int i = 0; i < quests.size(); i++) {
-            if (quests.get(i).guiDisplay != null) {
-                ItemStack display = quests.get(i).guiDisplay;
+        Inventory inv = plugin.getServer().createInventory(player, ((quests.size() / 9) + 1) * 9, 
+                Lang.get(player, "quests") + " | " + npc.getName());
+        int i = 0;
+        for (Quest quest : quests) {
+            if (quest.guiDisplay != null) {
+                if (i > 53) {
+                    // Protocol-enforced size limit has been exceeded
+                    break;
+                }
+                ItemStack display = quest.guiDisplay;
                 ItemMeta meta = display.getItemMeta();
-                if (completedQuests.contains(quests.get(i).getName())) {
-                    meta.setDisplayName(ChatColor.DARK_PURPLE + ConfigUtil.parseString(quests.get(i).getName()
+                if (completedQuests.contains(quest.getName())) {
+                    meta.setDisplayName(ChatColor.DARK_PURPLE + ConfigUtil.parseString(quest.getName()
                             + " " + ChatColor.GREEN + Lang.get(player, "redoCompleted"), npc));
                 } else {
-                    meta.setDisplayName(ChatColor.DARK_PURPLE + ConfigUtil.parseString(quests.get(i).getName(), npc));
+                    meta.setDisplayName(ChatColor.DARK_PURPLE + ConfigUtil.parseString(quest.getName(), npc));
                 }
                 if (!meta.hasLore()) {
                     LinkedList<String> lines = new LinkedList<String>();
-                    String desc = quests.get(i).description;
+                    String desc = quest.description;
                     if (desc.equals(ChatColor.stripColor(desc))) {
                         lines = MiscUtil.makeLines(desc, " ", 40, ChatColor.DARK_GREEN);
                     } else {
@@ -3385,17 +3458,17 @@ public class Quester {
                     meta.setLore(lines);
                 }
                 display.setItemMeta(meta);
-                inv.setItem(inc, display);
-                inc++;
+                inv.setItem(i, display);
+                i++;
             }
         }
         player.openInventory(inv);
     }
 
     /**
-     * Force Quester to quit the specified quest<p>
+     * Force Quester to quit the specified quest (canceling any timers), then update Quest Journal<p>
      * 
-     * Also cancels any timers
+     * Does not save changes to disk. Consider {@link #quitQuest(Quest, String)} or {@link #quitQuest(Quest, String[])}
      * 
      * @param quest The quest to quit
      */
@@ -3419,7 +3492,10 @@ public class Quester {
     }
 
     /**
-     * Forcibly remove quest from Quester's list of completed quests
+     * Forcibly remove quest from Quester's list of completed quests, then update Quest Journal<p>
+     * 
+     * Does not save changes to disk. Consider calling {@link #saveData()} followed by {@link #loadData()}
+     * 
      * @param quest The quest to remove
      */
     public void hardRemove(Quest quest) {
@@ -3431,9 +3507,9 @@ public class Quester {
     }
 
     /**
-     * Forcibly clear Quester's list of current quests<p>
+     * Forcibly clear Quester's list of current quests and data, then update Quest Journal<p>
      * 
-     * Also resets associated quest data
+     * Does not save changes to disk. Consider calling {@link #saveData()} followed by {@link #loadData()}
      */
     public void hardClear() {
         try {
@@ -3446,7 +3522,10 @@ public class Quester {
     }
 
     /**
-     * Forcibly set Quester's current stage
+     * Forcibly set Quester's current stage, then update Quest Journal
+     * 
+     * Does not save changes to disk. Consider calling {@link #saveData()} followed by {@link #loadData()}
+     * 
      * @param key The quest to set stage of
      * @param val The stage number to set
      */
@@ -3459,7 +3538,10 @@ public class Quester {
     }
 
     /**
-     * Forcibly set Quester's quest data
+     * Forcibly set Quester's quest data, then update Quest Journal<p>
+     * 
+     * Does not save changes to disk. Consider calling {@link #saveData()} followed by {@link #loadData()}
+     * 
      * @param key The quest to set stage of
      * @param val The data to set
      */
@@ -3477,36 +3559,85 @@ public class Quester {
      * Will set to Quester's spawn location if bed spawn does not exist
      */
     public void resetCompass() {
-        if (!plugin.getSettings().canUseCompass())
-            return;
         Player player = getPlayer();
-        if (player == null)
+        if (player == null) {
             return;
+        }
+        if (!getPlayer().hasPermission("quests.compass")) {
+            return;
+        }
+        
         Location defaultLocation = player.getBedSpawnLocation();
         if (defaultLocation == null) {
             defaultLocation = player.getWorld().getSpawnLocation();
         }
-        player.setCompassTarget(defaultLocation);
+        compassTargetQuestId = null;
+        if (defaultLocation != null) {
+            player.setCompassTarget(defaultLocation);
+        }
     }
 
     /**
-     * Gets first stage target from current quests, then updates compass accordingly
+     * Update compass target to current stage of first available current quest, if possible
      */
     public void findCompassTarget() {
-        if (!plugin.getSettings().canUseCompass())
+        if (!getPlayer().hasPermission("quests.compass")) {
             return;
-        Player player = getPlayer();
-        if (player == null)
-            return;
+        }
         for (Quest quest : currentQuests.keySet()) {
             Stage stage = getCurrentStage(quest);
-            if (stage != null && quest.updateCompass(this, stage))
+            if (stage != null && quest.updateCompass(this, stage)) {
                 break;
+            }
         }
     }
     
     /**
+     * Update compass target to current stage of next available current quest, if possible
+     * 
+     * @param notify Whether to notify this quester of result
+     */
+    public void findNextCompassTarget(boolean notify) {
+        if (!getPlayer().hasPermission("quests.compass")) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, new Runnable() {
+            @Override
+            public void run() {
+                LinkedList<String> list = currentQuests.keySet().stream()
+                        .sorted(Comparator.comparing(Quest::getName)).map(Quest::getId)
+                        .collect(Collectors.toCollection(LinkedList::new));
+                int index = 0;
+                if (compassTargetQuestId != null) {
+                    if (!list.contains(compassTargetQuestId) && notify) {
+                        return;
+                    }
+                    index = list.indexOf(compassTargetQuestId) + 1;
+                    if (index >= list.size()) {
+                        index = 0;
+                    }
+                }
+                if (list.size() > 0) {
+                    final Quest quest = plugin.getQuestById(list.get(index));
+                    compassTargetQuestId = quest.getId();
+                    final Stage stage = getCurrentStage(quest);
+                    if (stage != null) {
+                        quest.updateCompass(Quester.this, stage);
+                        if (notify && getPlayer().isOnline()) {
+                            getPlayer().sendMessage(ChatColor.YELLOW + Lang.get(getPlayer(), "compassSet")
+                                    .replace("<quest>", ChatColor.GOLD + quest.getName() + ChatColor.YELLOW));
+                        }
+                    }
+                } else {
+                    getPlayer().sendMessage(ChatColor.RED + Lang.get(getPlayer(), "journalNoQuests"));
+                }
+            }
+        });
+    }
+    
+    /**
      * Check whether the Quester's inventory contains the specified item
+     * 
      * @param is The item with a specified amount to check
      * @return true if the inventory contains at least the amount of the specified stack 
      */
@@ -3627,16 +3758,6 @@ public class Quester {
             return false;
         }
         if (canAcceptOffer(quest, giveReason)) {
-            if (quest.getRegionStart() != null) {
-                if (!quest.isInRegion(this)) {
-                    if (giveReason) {
-                        String msg = Lang.get(getPlayer(), "questInvalidLocation");
-                        msg = msg.replace("<quest>", ChatColor.AQUA + quest.getName() + ChatColor.YELLOW);
-                        getPlayer().sendMessage(ChatColor.YELLOW + msg);
-                    }
-                    return false;
-                }
-            }
             if (getPlayer() instanceof Conversable) {
                 if (getPlayer().isConversing() == false) {
                     setQuestToTake(quest.getName());
@@ -3692,7 +3813,12 @@ public class Quester {
                 getPlayer().sendMessage(ChatColor.YELLOW + msg);
             }
             return false;
-        } else if (quest.getNpcStart() != null && plugin.getSettings().canAllowCommandsForNpcQuests() == false) {
+        } else if (plugin.getDependencies().getCitizens() != null
+                && plugin.getSettings().canAllowCommandsForNpcQuests() == false
+                && quest.getNpcStart() != null && quest.getNpcStart().getEntity() != null 
+                && quest.getNpcStart().getEntity().getLocation().getWorld().getName().equals(
+                getPlayer().getLocation().getWorld().getName())
+                && quest.getNpcStart().getEntity().getLocation().distance(getPlayer().getLocation()) > 6.0) {
             if (giveReason) {
                 String msg = Lang.get(getPlayer(), "mustSpeakTo");
                 msg = msg.replace("<npc>", ChatColor.DARK_PURPLE + quest.getNpcStart().getName() + ChatColor.YELLOW);
@@ -3715,6 +3841,15 @@ public class Quester {
                 getPlayer().sendMessage(ChatColor.YELLOW + msg);
             }
             return false;
+        } else if (quest.getRegionStart() != null) {
+            if (!quest.isInRegion(this)) {
+                if (giveReason) {
+                    String msg = Lang.get(getPlayer(), "questInvalidLocation");
+                    msg = msg.replace("<quest>", ChatColor.AQUA + quest.getName() + ChatColor.YELLOW);
+                    getPlayer().sendMessage(ChatColor.YELLOW + msg);
+                }
+                return false;
+            }
         }
         return true;
     }

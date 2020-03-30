@@ -19,6 +19,7 @@ public class CK {
     public static final String ED_QUEST_DELETE = "delQuest";
     public static final String ED_EVENT_DELETE = "delEvent";
     // Quests
+    public static final String Q_ID = "questId";
     public static final String Q_NAME = "questName";
     public static final String Q_ASK_MESSAGE = "askMessage";
     public static final String Q_FINISH_MESSAGE = "finishMessage";
@@ -118,6 +119,7 @@ public class CK {
     public static final String REW_COMMAND = "commandRews";
     public static final String REW_COMMAND_OVERRIDE_DISPLAY = "commandOverrideDisplay";
     public static final String REW_PERMISSION = "permissionRews";
+    public static final String REW_PERMISSION_WORLDS = "permissionWorlds";
     public static final String REW_MCMMO_SKILLS = "mcMMOSkillRews";
     public static final String REW_MCMMO_AMOUNTS = "mcMMOSkillAmounts";
     public static final String REW_HEROES_CLASSES = "heroesClassRews";
@@ -127,6 +129,7 @@ public class CK {
     public static final String REW_CUSTOM_DATA = "customRewData";
     public static final String REW_CUSTOM_DATA_DESCRIPTIONS = "customRewDataDesc";
     public static final String REW_CUSTOM_DATA_TEMP = "customRewDataTemp";
+    public static final String REW_DETAILS_OVERRIDE = "detailsOverrideRew";
     // Planner
     public static final String PLN_START_DATE = "startDatePln";
     public static final String PLN_END_DATE = "endDatePln";

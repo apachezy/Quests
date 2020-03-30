@@ -38,6 +38,9 @@ permissions:
     quests.journal:
         description: Toggle the Quest Journal
         default: true
+    quests.compass:
+        description: Use a Compass to target quests
+        default: true
     quests.admin:
         description: Display administrator help
         default: op
@@ -118,12 +121,6 @@ permissions:
         default: op
     quests.actions.delete:
         description: Ability to delete existing actions
-        default: op
-    quests.party.create:
-        description: Ability to create new parties
-        default: true
-    quests.party.join:
-        description: Join parties without invitation
         default: op
 commands:
     quests:

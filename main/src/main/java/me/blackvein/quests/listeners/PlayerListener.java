@@ -14,10 +14,10 @@
 package me.blackvein.quests.listeners;
 
 import java.io.File;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.bukkit.Bukkit;
@@ -80,7 +80,7 @@ import net.citizensnpcs.api.CitizensAPI;
 
 public class PlayerListener implements Listener {
 
-    final Quests plugin;
+    private final Quests plugin;
 
     public PlayerListener(Quests newPlugin) {
         plugin = newPlugin;
@@ -122,50 +122,14 @@ public class PlayerListener implements Listener {
                 for (Quest quest : plugin.getQuests()) {
                     if (quest.getGUIDisplay() != null) {
                         if (ItemUtil.compareItems(clicked, quest.getGUIDisplay(), false) == 0) {
-                            if (quester.getCurrentQuests().size() >= plugin.getSettings().getMaxQuests() 
-                                    && plugin.getSettings().getMaxQuests() > 0) {
-                                String msg = Lang.get(player, "questMaxAllowed");
-                                msg = msg.replace("<number>", String.valueOf(plugin.getSettings().getMaxQuests()));
-                                player.sendMessage(ChatColor.YELLOW + msg);
-                            } else if (quester.getCompletedQuests().contains(quest.getName()) 
-                                    && quest.getPlanner().getCooldown() < 0) {
-                                String completed = Lang.get(player, "questAlreadyCompleted");
-                                completed = completed.replace("<quest>", ChatColor.AQUA + quest.getName() 
-                                        + ChatColor.YELLOW);
-                                player.sendMessage(ChatColor.YELLOW + completed);
-                            } else {
-                                boolean takeable = true;
-                                if (quester.getCompletedQuests().contains(quest.getName())) {
-                                    if (quester.getCooldownDifference(quest) > 0) {
-                                        String early = Lang.get(player, "questTooEarly");
-                                        early = early.replace("<quest>", ChatColor.AQUA + quest.getName() 
-                                                + ChatColor.YELLOW);
-                                        early = early.replace("<time>", ChatColor.DARK_PURPLE 
-                                                + MiscUtil.getTime(quester.getCooldownDifference(quest)) 
-                                                + ChatColor.YELLOW);
-                                        player.sendMessage(ChatColor.YELLOW + early);
-                                        takeable = false;
-                                    }
+                            if (quester.canAcceptOffer(quest, true)) {
+                                try { 
+                                    quester.takeQuest(quest, false);
+                                } catch (Exception e) {
+                                    e.printStackTrace();
                                 }
-                                if (quest.getRegionStart() != null) {
-                                    if (!quest.isInRegion(quester)) {
-                                        String invalidLoc = Lang.get(player, "questInvalidLocation");
-                                        invalidLoc = invalidLoc.replace("<quest>", ChatColor.AQUA + quest.getName() 
-                                                + ChatColor.YELLOW);
-                                        player.sendMessage(ChatColor.YELLOW + invalidLoc);
-                                        takeable = false;
-                                    }
-                                }
-                                if (takeable == true) {
-                                    try { 
-                                        quester.takeQuest(quest, false);
-                                    } catch (Exception e) {
-                                        e.printStackTrace();
-                                    }
-                                    
-                                }
-                                evt.getWhoClicked().closeInventory();
                             }
+                            evt.getWhoClicked().closeInventory();
                         }
                     }
                 }
@@ -211,10 +175,17 @@ public class PlayerListener implements Listener {
             // Do nothing, getHand() not present pre-1.9
         }
         if (e == null || e.equals(EquipmentSlot.HAND)) { //If the event is fired by HAND (main hand)
+            if (evt.hasBlock() && evt.getClickedBlock().getType().name().equals("LECTERN")) {
+                if (ItemUtil.isJournal(evt.getPlayer().getItemInHand())) {
+                    evt.setCancelled(true);
+                    evt.getPlayer().sendMessage(ChatColor.RED + Lang.get(evt.getPlayer(), "journalDenied"));
+                    return;
+                }
+            }
             if (plugin.checkQuester(evt.getPlayer().getUniqueId()) == false) {
+                final Quester quester = plugin.getQuester(evt.getPlayer().getUniqueId());
+                final Player player = evt.getPlayer();
                 if (evt.getAction().equals(Action.RIGHT_CLICK_BLOCK)) {
-                    final Quester quester = plugin.getQuester(evt.getPlayer().getUniqueId());
-                    final Player player = evt.getPlayer();
                     boolean hasObjective = false;
                     if (evt.isCancelled() == false) {
                         final ItemStack blockItemStack = new ItemStack(evt.getClickedBlock().getType(), 1, evt
@@ -346,7 +317,7 @@ public class PlayerListener implements Listener {
                                                     early = early.replace("<quest>", ChatColor.AQUA + q.getName() 
                                                             + ChatColor.YELLOW);
                                                     early = early.replace("<time>", ChatColor.DARK_PURPLE 
-                                                            + Quests.getTime(quester.getCooldownDifference(q)) 
+                                                            + MiscUtil.getTime(quester.getCooldownDifference(q)) 
                                                             + ChatColor.YELLOW);
                                                     player.sendMessage(ChatColor.YELLOW + early);
                                                     return;
@@ -374,6 +345,19 @@ public class PlayerListener implements Listener {
                                 }
                             }
                         }
+                    }
+                }
+                if (evt.getItem() != null && evt.getItem().getType().equals(Material.COMPASS)) {
+                    if (!player.hasPermission("quests.compass")) {
+                        return;
+                    }
+                    if (evt.getAction().equals(Action.LEFT_CLICK_AIR)
+                            || evt.getAction().equals(Action.LEFT_CLICK_BLOCK)) {
+                        quester.resetCompass();
+                        player.sendMessage(ChatColor.YELLOW + Lang.get(player, "compassReset"));
+                    } else if (evt.getAction().equals(Action.RIGHT_CLICK_AIR)
+                            || evt.getAction().equals(Action.RIGHT_CLICK_BLOCK)) {
+                        quester.findNextCompassTarget(true);
                     }
                 }
             }
@@ -875,14 +859,16 @@ public class PlayerListener implements Listener {
     
     /**
      * Checks if damager is blacklisted. Ensures damager and target are Player and not NPC.
-     * Kills target Player if objective exists
+     * Kills target Player if objective exists<p>
+     * 
+     * As of 3.8.9, damager and target must not be the same entity
      * 
      * @param damager the attacking entity
      * @param target the entity being attacked
      * @since 3.1.4
      */
     public void preKillPlayer(Entity damager, Entity target) {
-        if (damager == null) {
+        if (damager == null || target == null || damager.equals(target)) {
             return;
         }
         if (!plugin.canUseQuests(damager.getUniqueId())) {
@@ -964,7 +950,7 @@ public class PlayerListener implements Listener {
             LinkedList<Quester> temp = plugin.getQuesters();
             temp.add(quester);
             plugin.setQuesters(temp);
-            if (plugin.getSettings().canUseCompass()) {
+            if (evt.getPlayer().hasPermission("quests.compass")) {
                 quester.resetCompass();
             }
             for (String s : quester.getCompletedQuests()) {
@@ -1019,9 +1005,9 @@ public class PlayerListener implements Listener {
             if (quester.hasData()) {
                 quester.saveData();
             }
-            if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getPlayer())) {
-                HashSet<Player> temp = plugin.getQuestFactory().getSelectingNpcs();
-                temp.remove(evt.getPlayer());
+            if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getPlayer().getUniqueId())) {
+                Set<UUID> temp = plugin.getQuestFactory().getSelectingNpcs();
+                temp.remove(evt.getPlayer().getUniqueId());
                 plugin.getQuestFactory().setSelectingNpcs(temp);
             }
             LinkedList<Quester> temp = plugin.getQuesters();
@@ -1038,6 +1024,9 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerMove(PlayerMoveEvent evt) {
         if (evt.getFrom().getBlock().equals(evt.getTo().getBlock())) {
+            return;
+        }
+        if (evt.getPlayer() == null) {
             return;
         }
         if (plugin.getDependencies().getCitizens() != null) {

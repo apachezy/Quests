@@ -22,7 +22,7 @@ import me.blackvein.quests.Quester;
  * Called before an online quester completes a quest
  */
 public class QuesterPreCompleteQuestEvent extends QuesterEvent implements Cancellable {
-    private static final HandlerList handlers = new HandlerList();
+    private static final HandlerList HANDLERS = new HandlerList();
     private Quest quest;
     private boolean cancel = false;
     
@@ -51,10 +51,10 @@ public class QuesterPreCompleteQuestEvent extends QuesterEvent implements Cancel
     }
     
     public HandlerList getHandlers() {
-        return handlers;
+        return HANDLERS;
     }
      
     public static HandlerList getHandlerList() {
-        return handlers;
+        return HANDLERS;
     }
 }

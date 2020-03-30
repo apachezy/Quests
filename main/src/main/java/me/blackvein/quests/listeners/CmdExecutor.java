@@ -34,7 +34,6 @@ import me.blackvein.quests.events.command.QuestsCommandPreQuestsEditorEvent;
 import me.blackvein.quests.events.command.QuestsCommandPreQuestsJournalEvent;
 import me.blackvein.quests.events.command.QuestsCommandPreQuestsListEvent;
 import me.blackvein.quests.events.quest.QuestQuitEvent;
-import me.blackvein.quests.exceptions.InvalidStageException;
 import me.blackvein.quests.util.ItemUtil;
 import me.blackvein.quests.util.Lang;
 import me.blackvein.quests.util.MiscUtil;
@@ -484,7 +483,7 @@ public class CmdExecutor implements CommandExecutor {
                 || cs.hasPermission("quests.actions.editor") || cs.hasPermission("quests.events.editor")) {
             Conversable c = (Conversable) cs;
             if (!c.isConversing()) {
-                plugin.getEventFactory().getConversationFactory().buildConversation(c).begin();
+                plugin.getActionFactory().getConversationFactory().buildConversation(c).begin();
             } else {
                 cs.sendMessage(ChatColor.RED + Lang.get("duplicateEditor"));
             }
@@ -519,163 +518,169 @@ public class CmdExecutor implements CommandExecutor {
     }
 
     private boolean questsTop(final CommandSender cs, String[] args) {
-        if (args.length > 2) {
-            cs.sendMessage(ChatColor.YELLOW + Lang.get("COMMAND_TOP_USAGE"));
-        } else {
-            int topNumber;
-            if (args.length == 1) {
-                topNumber = 5; // default
+        if (cs.hasPermission("quests.top")) {
+            if (args.length > 2) {
+                cs.sendMessage(ChatColor.YELLOW + Lang.get("COMMAND_TOP_USAGE"));
             } else {
-                try {
-                    topNumber = Integer.parseInt(args[1]);
-                } catch (NumberFormatException e) {
-                    cs.sendMessage(ChatColor.YELLOW + Lang.get("inputNum"));
+                int topNumber;
+                if (args.length == 1) {
+                    topNumber = 5; // default
+                } else {
+                    try {
+                        topNumber = Integer.parseInt(args[1]);
+                    } catch (NumberFormatException e) {
+                        cs.sendMessage(ChatColor.YELLOW + Lang.get("inputNum"));
+                        return true;
+                    }
+                }
+                if (topNumber < 1 || topNumber > plugin.getSettings().getTopLimit()) {
+                    cs.sendMessage(ChatColor.YELLOW + Lang.get("invalidRange").replace("<least>", "1")
+                            .replace("<greatest>", String.valueOf(plugin.getSettings().getTopLimit())));
                     return true;
                 }
-            }
-            if (topNumber < 1 || topNumber > plugin.getSettings().getTopLimit()) {
-                cs.sendMessage(ChatColor.YELLOW + Lang.get("invalidRange").replace("<least>", "1")
-                        .replace("<greatest>", String.valueOf(plugin.getSettings().getTopLimit())));
-                return true;
-            }
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, new Runnable() {
-                @Override
-                public void run() {
-                    File folder = new File(plugin.getDataFolder(), "data");
-                    File[] playerFiles = folder.listFiles();
-                    Map<String, Integer> questPoints = new HashMap<String, Integer>();
-                    if (playerFiles != null) {
-                        for (File f : playerFiles) {
-                            if (!f.isDirectory()) {
-                                FileConfiguration data = new YamlConfiguration();
-                                try {
-                                    data.load(f);
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                } catch (InvalidConfigurationException e) {
-                                    e.printStackTrace();
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, new Runnable() {
+                    @Override
+                    public void run() {
+                        File folder = new File(plugin.getDataFolder(), "data");
+                        File[] playerFiles = folder.listFiles();
+                        Map<String, Integer> questPoints = new HashMap<String, Integer>();
+                        if (playerFiles != null) {
+                            for (File f : playerFiles) {
+                                if (!f.isDirectory()) {
+                                    FileConfiguration data = new YamlConfiguration();
+                                    try {
+                                        data.load(f);
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    } catch (InvalidConfigurationException e) {
+                                        e.printStackTrace();
+                                    }
+                                    questPoints.put(data.getString("lastKnownName", "Unknown"), 
+                                            data.getInt("quest-points", 0));
                                 }
-                                questPoints.put(data.getString("lastKnownName", "Unknown"), 
-                                        data.getInt("quest-points", 0));
+                            }
+                        }
+                        LinkedHashMap<String, Integer> sortedMap = (LinkedHashMap<String, Integer>) sort(questPoints);
+                        int numPrinted = 0;
+                        String msg = Lang.get("topQuestersTitle");
+                        msg = msg.replace("<number>", ChatColor.DARK_PURPLE + "" + topNumber + ChatColor.GOLD);
+                        cs.sendMessage(ChatColor.GOLD + msg);
+                        for (Entry<String, Integer> entry : sortedMap.entrySet()) {
+                            numPrinted++;
+                            cs.sendMessage(ChatColor.YELLOW + String.valueOf(numPrinted) + ". " + entry.getKey() + " - " 
+                                    + ChatColor.DARK_PURPLE + entry.getValue() + ChatColor.YELLOW + " " 
+                                    + Lang.get("questPoints"));
+                            if (numPrinted == topNumber) {
+                                break;
                             }
                         }
                     }
-                    LinkedHashMap<String, Integer> sortedMap = (LinkedHashMap<String, Integer>) sort(questPoints);
-                    int numPrinted = 0;
-                    String msg = Lang.get("topQuestersTitle");
-                    msg = msg.replace("<number>", ChatColor.DARK_PURPLE + "" + topNumber + ChatColor.GOLD);
-                    cs.sendMessage(ChatColor.GOLD + msg);
-                    for (Entry<String, Integer> entry : sortedMap.entrySet()) {
-                        numPrinted++;
-                        cs.sendMessage(ChatColor.YELLOW + String.valueOf(numPrinted) + ". " + entry.getKey() + " - " 
-                                + ChatColor.DARK_PURPLE + entry.getValue() + ChatColor.YELLOW + " " 
-                                + Lang.get("questPoints"));
-                        if (numPrinted == topNumber) {
-                            break;
-                        }
-                    }
-                }
-            });
+                });
+            }
         }
         return true;
     }
 
     private void questsStats(final CommandSender cs, String[] args) {
-        OfflinePlayer target;
-        if (args != null) {
-            target = getPlayer(args[1]);
-            if (target == null) {
-                try {
-                    target = Bukkit.getOfflinePlayer(UUID.fromString(args[1]));
-                } catch (IllegalArgumentException e) {
-                    cs.sendMessage(ChatColor.YELLOW + Lang.get("playerNotFound"));
-                    return;
+        if (cs.hasPermission("quests.stats")) {
+            OfflinePlayer target;
+            if (args != null) {
+                target = getPlayer(args[1]);
+                if (target == null) {
+                    try {
+                        target = Bukkit.getOfflinePlayer(UUID.fromString(args[1]));
+                    } catch (IllegalArgumentException e) {
+                        cs.sendMessage(ChatColor.YELLOW + Lang.get("playerNotFound"));
+                        return;
+                    }
+                }
+            } else {
+                target = Bukkit.getOfflinePlayer(((Player)cs).getUniqueId());
+            }
+            Quester quester = plugin.getQuester(target.getUniqueId());
+            cs.sendMessage(ChatColor.GOLD + "- " + target.getName() + " -");
+            cs.sendMessage(ChatColor.YELLOW + Lang.get("questPointsDisplay") + " " + ChatColor.DARK_PURPLE
+                    + quester.getQuestPoints());
+            if (quester.getCurrentQuests().isEmpty()) {
+                cs.sendMessage(ChatColor.YELLOW + Lang.get("currentQuest") + " " + ChatColor.DARK_PURPLE+ Lang.get("none"));
+            } else {
+                cs.sendMessage(ChatColor.YELLOW + Lang.get("currentQuest"));
+                for (Entry<Quest, Integer> set : quester.getCurrentQuests().entrySet()) {
+                    Quest q = set.getKey();
+                    String msg = ChatColor.LIGHT_PURPLE + " - " + ChatColor.DARK_PURPLE + q.getName()
+                        + ChatColor.LIGHT_PURPLE + " (" + Lang.get("stageEditorStage") + " " +  (set.getValue() + 1) + ")";
+                    cs.sendMessage(msg);
                 }
             }
-        } else {
-            target = Bukkit.getOfflinePlayer(((Player)cs).getUniqueId());
-        }
-        Quester quester = plugin.getQuester(target.getUniqueId());
-        cs.sendMessage(ChatColor.GOLD + "- " + target.getName() + " -");
-        cs.sendMessage(ChatColor.YELLOW + Lang.get("questPointsDisplay") + " " + ChatColor.DARK_PURPLE
-                + quester.getQuestPoints());
-        if (quester.getCurrentQuests().isEmpty()) {
-            cs.sendMessage(ChatColor.YELLOW + Lang.get("currentQuest") + " " + ChatColor.DARK_PURPLE+ Lang.get("none"));
-        } else {
-            cs.sendMessage(ChatColor.YELLOW + Lang.get("currentQuest"));
-            for (Entry<Quest, Integer> set : quester.getCurrentQuests().entrySet()) {
-                Quest q = set.getKey();
-                String msg = ChatColor.LIGHT_PURPLE + " - " + ChatColor.DARK_PURPLE + q.getName()
-                    + ChatColor.LIGHT_PURPLE + " (" + Lang.get("stageEditorStage") + " " +  (set.getValue() + 1) + ")";
-                cs.sendMessage(msg);
-            }
-        }
-        String completed;
-        if (quester.getCompletedQuests().isEmpty()) {
-            completed = ChatColor.DARK_PURPLE + Lang.get("none");
-        } else {
-            completed = ChatColor.DARK_PURPLE + "";
-            for (String s : quester.getCompletedQuests()) {
-                completed += s;
-                if (quester.getAmountsCompleted().containsKey(s) && quester.getAmountsCompleted().get(s) > 1) {
-                    completed += ChatColor.LIGHT_PURPLE + " (x" + quester.getAmountsCompleted().get(s) + ")";
-                }
-                if (quester.getCompletedQuests().indexOf(s) < (quester.getCompletedQuests().size() - 1)) {
-                    completed += ", ";
+            cs.sendMessage(ChatColor.YELLOW + Lang.get("completedQuestsTitle"));
+
+            if (quester.getCompletedQuests().isEmpty()) {
+                cs.sendMessage(ChatColor.DARK_PURPLE + Lang.get("none"));
+            } else {
+                for (String s : quester.getCompletedQuests()) {
+                    StringBuilder completed = new StringBuilder();
+                    completed.append(ChatColor.DARK_PURPLE + s);
+                    if (quester.getAmountsCompleted().containsKey(s) && quester.getAmountsCompleted().get(s) > 1) {
+                        completed.append(ChatColor.LIGHT_PURPLE + " (x" + quester.getAmountsCompleted().get(s) + ")");
+                    }
+                    if (quester.getCompletedQuests().indexOf(s) < (quester.getCompletedQuests().size() - 1)) {
+                        completed.append(", ");
+                    }
+                    cs.sendMessage(completed.toString());
                 }
             }
         }
-        cs.sendMessage(ChatColor.YELLOW + Lang.get("completedQuestsTitle"));
-        cs.sendMessage(completed);
     }
 
     @SuppressWarnings("deprecation")
     private void questsJournal(final Player player) {
-        Quester quester = plugin.getQuester(player.getUniqueId());
-        QuestsCommandPreQuestsJournalEvent preEvent = new QuestsCommandPreQuestsJournalEvent(quester);
-        plugin.getServer().getPluginManager().callEvent(preEvent);
-        if (preEvent.isCancelled()) {
-            return;
-        }
-        
-        Inventory inv = player.getInventory();
-        if (quester.hasJournal) {
-            ItemStack[] arr = inv.getContents();
-            for (int i = 0; i < arr.length; i++) {
-                if (arr[i] != null) {
-                    if (ItemUtil.isJournal(arr[i])) {
-                        inv.setItem(i, null);
+        if (((Player) player).hasPermission("quests.journal")) {
+            Quester quester = plugin.getQuester(player.getUniqueId());
+            QuestsCommandPreQuestsJournalEvent preEvent = new QuestsCommandPreQuestsJournalEvent(quester);
+            plugin.getServer().getPluginManager().callEvent(preEvent);
+            if (preEvent.isCancelled()) {
+                return;
+            }
+            
+            Inventory inv = player.getInventory();
+            if (quester.hasJournal) {
+                ItemStack[] arr = inv.getContents();
+                for (int i = 0; i < arr.length; i++) {
+                    if (arr[i] != null) {
+                        if (ItemUtil.isJournal(arr[i])) {
+                            inv.setItem(i, null);
+                        }
                     }
                 }
-            }
-            player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalPutAway"));
-            quester.hasJournal = false;
-        } else if (player.getItemInHand() == null || player.getItemInHand().getType().equals(Material.AIR)) {
-            ItemStack stack = new ItemStack(Material.WRITTEN_BOOK, 1);
-            ItemMeta meta = stack.getItemMeta();
-            meta.setDisplayName(ChatColor.LIGHT_PURPLE + Lang.get("journalTitle"));
-            stack.setItemMeta(meta);
-            player.setItemInHand(stack);
-            player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalTaken"));
-            quester.hasJournal = true;
-            quester.updateJournal();
-        } else if (inv.firstEmpty() != -1) {
-            ItemStack[] arr = inv.getContents();
-            for (int i = 0; i < arr.length; i++) {
-                if (arr[i] == null) {
-                    ItemStack stack = new ItemStack(Material.WRITTEN_BOOK, 1);
-                    ItemMeta meta = stack.getItemMeta();
-                    meta.setDisplayName(ChatColor.LIGHT_PURPLE + Lang.get("journalTitle"));
-                    stack.setItemMeta(meta);
-                    inv.setItem(i, stack);
-                    player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalTaken"));
-                    quester.hasJournal = true;
-                    quester.updateJournal();
-                    break;
+                player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalPutAway"));
+                quester.hasJournal = false;
+            } else if (player.getItemInHand() == null || player.getItemInHand().getType().equals(Material.AIR)) {
+                ItemStack stack = new ItemStack(Material.WRITTEN_BOOK, 1);
+                ItemMeta meta = stack.getItemMeta();
+                meta.setDisplayName(ChatColor.LIGHT_PURPLE + Lang.get("journalTitle"));
+                stack.setItemMeta(meta);
+                player.setItemInHand(stack);
+                player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalTaken"));
+                quester.hasJournal = true;
+                quester.updateJournal();
+            } else if (inv.firstEmpty() != -1) {
+                ItemStack[] arr = inv.getContents();
+                for (int i = 0; i < arr.length; i++) {
+                    if (arr[i] == null) {
+                        ItemStack stack = new ItemStack(Material.WRITTEN_BOOK, 1);
+                        ItemMeta meta = stack.getItemMeta();
+                        meta.setDisplayName(ChatColor.LIGHT_PURPLE + Lang.get("journalTitle"));
+                        stack.setItemMeta(meta);
+                        inv.setItem(i, stack);
+                        player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalTaken"));
+                        quester.hasJournal = true;
+                        quester.updateJournal();
+                        break;
+                    }
                 }
+            } else {
+                player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalNoRoom"));
             }
-        } else {
-            player.sendMessage(ChatColor.YELLOW + Lang.get(player, "journalNoRoom"));
         }
     }
 
@@ -695,13 +700,9 @@ public class CmdExecutor implements CommandExecutor {
                         if (event.isCancelled()) {
                             return;
                         }
-                        quester.hardQuit(quest);
                         String msg = Lang.get("questQuit");
                         msg = msg.replace("<quest>", ChatColor.DARK_PURPLE + quest.getName() + ChatColor.YELLOW);
-                        player.sendMessage(ChatColor.YELLOW + msg);
-                        quester.saveData();
-                        quester.loadData();
-                        quester.updateJournal();
+                        quester.quitQuest(quest, msg);
                     } else {
                         player.sendMessage(ChatColor.YELLOW + Lang.get(player, "questQuitDisabled"));
                     }
@@ -744,7 +745,6 @@ public class CmdExecutor implements CommandExecutor {
         }
     }
 
-    @SuppressWarnings("deprecation")
     private void questsList(final CommandSender cs, String[] args) {
         if (cs.hasPermission("quests.list")) {
             if (!(cs instanceof Player)) {
@@ -764,7 +764,7 @@ public class CmdExecutor implements CommandExecutor {
                     return;
                 }
                 
-                plugin.listQuests(player, 1);
+                plugin.listQuests(quester, 1);
             } else if (args.length == 2) {
                 int page = 1;
                 try {
@@ -780,7 +780,7 @@ public class CmdExecutor implements CommandExecutor {
                             return;
                         }
                         
-                        plugin.listQuests(player, page);
+                        plugin.listQuests(quester, page);
                     }
                 } catch (NumberFormatException e) {
                     cs.sendMessage(ChatColor.YELLOW + Lang.get("pageSelectionNum"));
@@ -804,7 +804,7 @@ public class CmdExecutor implements CommandExecutor {
         boolean translateSubCommands = plugin.getSettings().canTranslateSubCommands();
         cs.sendMessage(ChatColor.GOLD + Lang.get("questHelpTitle"));
         cs.sendMessage(ChatColor.YELLOW + "/quests " + Lang.get("questDisplayHelp"));
-        if (cs.hasPermission("quests.list") || cs.hasPermission("quests.list")) {
+        if (cs.hasPermission("quests.list")) {
             cs.sendMessage(ChatColor.YELLOW + "/quests "+ Lang.get("COMMAND_LIST_HELP")
                     .replace("<command>", ChatColor.GOLD + (translateSubCommands ? Lang.get("COMMAND_LIST")
                     : "list") + ChatColor.YELLOW));
@@ -1216,9 +1216,9 @@ public class CmdExecutor implements CommandExecutor {
                 }
                 try {
                     quest.setStage(quester, stage - 1);
-                } catch (InvalidStageException e) {
-                    String msg = Lang.get("invalidStageNum");
-                    msg = msg.replace("<quest>", ChatColor.DARK_PURPLE + quest.getName() + ChatColor.RED);
+                } catch (IndexOutOfBoundsException e) {
+                    String msg = Lang.get("invalidRange");
+                    msg = msg.replace("<least>", "1").replace("<greatest>", String.valueOf(quest.getStages().size()));
                     cs.sendMessage(ChatColor.RED + msg);
                 }
                 quester.saveData();
@@ -1291,20 +1291,14 @@ public class CmdExecutor implements CommandExecutor {
                     cs.sendMessage(ChatColor.RED + Lang.get("questNotFound"));
                     return;
                 }
-                quester.hardQuit(quest);
                 String msg1 = Lang.get("questForceQuit");
                 msg1 = msg1.replace("<player>", ChatColor.GREEN + target.getName() + ChatColor.GOLD);
                 msg1 = msg1.replace("<quest>", ChatColor.DARK_PURPLE + quest.getName() + ChatColor.GOLD);
                 cs.sendMessage(ChatColor.GOLD + msg1);
-                if (target.isOnline()) {
-                    Player p = (Player)target;
-                    String msg2 = Lang.get(p, "questForcedQuit");
-                    msg2 = msg2.replace("<player>", ChatColor.GREEN + cs.getName() + ChatColor.GOLD);
-                    msg2 = msg2.replace("<quest>", ChatColor.DARK_PURPLE + quest.getName() + ChatColor.GOLD);
-                    p.sendMessage(ChatColor.GREEN + msg2);
-                }
-                quester.saveData();
-                quester.updateJournal();
+                String msg2 = Lang.get((Player)target, "questForcedQuit");
+                msg2 = msg2.replace("<player>", ChatColor.GREEN + cs.getName() + ChatColor.GOLD);
+                msg2 = msg2.replace("<quest>", ChatColor.DARK_PURPLE + quest.getName() + ChatColor.GOLD);
+                quester.quitQuest(quest, msg2);
             }
         } else {
             cs.sendMessage(ChatColor.RED + Lang.get("noPermission"));

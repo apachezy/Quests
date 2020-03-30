@@ -26,6 +26,7 @@ public class Rewards {
     private List<String> commands = new LinkedList<String>();
     private List<String> commandsOverrideDisplay = new LinkedList<String>();
     private List<String> permissions = new LinkedList<String>();
+    private List<String> permissionWorlds = new LinkedList<String>();
     private List<ItemStack> items = new LinkedList<ItemStack>();
     private List<String> mcmmoSkills = new LinkedList<String>();
     private List<Integer> mcmmoAmounts = new LinkedList<Integer>();
@@ -33,6 +34,7 @@ public class Rewards {
     private List<Double> heroesAmounts = new LinkedList<Double>();
     private List<String> phatLoots = new LinkedList<String>();
     private Map<String, Map<String, Object>> customRewards = new HashMap<String, Map<String, Object>>();
+    private List<String> detailsOverride = new LinkedList<String>();
     
     public int getMoney() {
         return money;
@@ -69,6 +71,12 @@ public class Rewards {
     }
     public void setPermissions(List<String> permissions) {
         this.permissions = permissions;
+    }
+    public List<String> getPermissionWorlds() {
+        return permissionWorlds;
+    }
+    public void setPermissionWorlds(List<String> worldNames) {
+        this.permissionWorlds = worldNames;
     }
     public List<ItemStack> getItems() {
         return items;
@@ -111,5 +119,11 @@ public class Rewards {
     }
     protected void setCustomRewards(Map<String, Map<String, Object>> customRewards) {
         this.customRewards = customRewards;
+    }
+    public List<String> getDetailsOverride() {
+        return detailsOverride;
+    }
+    public void setDetailsOverride(List<String> detailsOverride) {
+        this.detailsOverride = detailsOverride;
     }
 }

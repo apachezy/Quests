@@ -13,6 +13,7 @@
 package me.blackvein.quests.listeners;
 
 import java.text.MessageFormat;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map.Entry;
 
@@ -36,6 +37,7 @@ import me.blackvein.quests.Quester;
 import me.blackvein.quests.Quests;
 import me.blackvein.quests.util.ItemUtil;
 import me.blackvein.quests.util.Lang;
+import me.blackvein.quests.util.MiscUtil;
 import me.blackvein.quests.util.RomanNumeral;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.event.NPCDeathEvent;
@@ -45,7 +47,7 @@ import net.citizensnpcs.api.npc.NPC;
 
 public class NpcListener implements Listener {
 
-    final Quests plugin;
+    private final Quests plugin;
 
     public NpcListener(Quests newPlugin) {
         plugin = newPlugin;
@@ -54,7 +56,11 @@ public class NpcListener implements Listener {
     @SuppressWarnings("deprecation")
     @EventHandler(priority = EventPriority.LOWEST)
     public void onNPCRightClick(NPCRightClickEvent evt) {
-        if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getClicker())) {
+        if (plugin.getDependencies().getCitizens() == null) {
+            // Ensure that Citizens is linked (may not be if it loads after Quests)
+            return;
+        }
+        if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getClicker().getUniqueId())) {
             evt.getClicker().sendMessage(ChatColor.GREEN + evt.getNPC().getName() + ": " + ChatColor.DARK_GREEN + "ID "
                     + evt.getNPC().getId());
             return;
@@ -102,7 +108,7 @@ public class NpcListener implements Listener {
                                     text += (hand.getItemMeta().hasDisplayName() ? ")" : "");
                                 }
                                 text += " x " + ChatColor.DARK_AQUA + hand.getAmount() + ChatColor.GRAY;
-                                if (plugin.getSettings().canTranslateItems() && !hasMeta 
+                                if (plugin.getSettings().canTranslateNames() && !hasMeta 
                                         && !hand.getItemMeta().hasDisplayName()) {
                                     plugin.getLocaleQuery().sendMessage(player, Lang
                                             .get(player, "questInvalidDeliveryItem").replace("<item>", text), hand
@@ -165,12 +171,16 @@ public class NpcListener implements Listener {
                                     if (hand.getType().equals(Material.ENCHANTED_BOOK)) {
                                         EnchantmentStorageMeta esmeta = (EnchantmentStorageMeta) hand.getItemMeta();
                                         if (esmeta.hasStoredEnchants()) {
-                                            // TODO translate enchantment names
+                                            // TODO translate Roman numerals
                                             for (Entry<Enchantment, Integer> e : esmeta.getStoredEnchants()
                                                     .entrySet()) {
-                                                player.sendMessage(ChatColor.GRAY + "\u2515 " + ChatColor.DARK_GREEN 
-                                                        + ItemUtil.getPrettyEnchantmentName(e.getKey()) + " " 
-                                                        + RomanNumeral.getNumeral(e.getValue()) + "\n");
+                                                HashMap<Enchantment, Integer> single 
+                                                        = new HashMap<Enchantment, Integer>();
+                                                single.put(e.getKey(), e.getValue());
+                                                plugin.getLocaleQuery().sendMessage(player, ChatColor.GRAY + "\u2515 " 
+                                                        + ChatColor.DARK_GREEN 
+                                                        + "<enchantment> " + RomanNumeral.getNumeral(e.getValue()) 
+                                                        + "\n", single);
                                             }
                                         }
                                     }
@@ -247,7 +257,7 @@ public class NpcListener implements Listener {
                                 String early = Lang.get(player, "questTooEarly");
                                 early = early.replace("<quest>", ChatColor.AQUA + q.getName() + ChatColor.YELLOW);
                                 early = early.replace("<time>", ChatColor.DARK_PURPLE 
-                                        + Quests.getTime(quester.getCooldownDifference(q)) + ChatColor.YELLOW);
+                                        + MiscUtil.getTime(quester.getCooldownDifference(q)) + ChatColor.YELLOW);
                                 player.sendMessage(ChatColor.YELLOW + early);
                             } else if (q.getPlanner().getCooldown() < 0) {
                                 String completed = Lang.get(player, "questAlreadyCompleted");
@@ -294,7 +304,11 @@ public class NpcListener implements Listener {
 
     @EventHandler
     public void onNPCLeftClick(NPCLeftClickEvent evt) {
-        if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getClicker())) {
+        if (plugin.getDependencies().getCitizens() == null) {
+            // Ensure that Citizens is linked (may not be if it loads after Quests)
+            return;
+        }
+        if (plugin.getQuestFactory().getSelectingNpcs().contains(evt.getClicker().getUniqueId())) {
             evt.getClicker().sendMessage(ChatColor.GREEN + evt.getNPC().getName() + ": " + ChatColor.DARK_GREEN 
                     + Lang.get("id") + " " + evt.getNPC().getId());
         }
@@ -302,6 +316,14 @@ public class NpcListener implements Listener {
 
     @EventHandler
     public void onNPCDeath(NPCDeathEvent evt) {
+        if (plugin.getDependencies().getCitizens() == null) {
+            // Ensure that Citizens is linked (may not be if it loads after Quests)
+            return;
+        }
+        if (evt.getNPC() == null || evt.getNPC().getEntity() == null 
+                || evt.getNPC().getEntity().getLastDamageCause() == null) {
+            return;
+        }
         if (evt.getNPC().getEntity().getLastDamageCause() instanceof EntityDamageByEntityEvent) {
             EntityDamageByEntityEvent damageEvent 
                     = (EntityDamageByEntityEvent) evt.getNPC().getEntity().getLastDamageCause();

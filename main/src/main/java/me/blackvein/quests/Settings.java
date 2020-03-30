@@ -17,6 +17,8 @@ import java.io.IOException;
 
 import org.bukkit.configuration.file.FileConfiguration;
 
+import me.blackvein.quests.util.Lang;
+
 public class Settings {
     
     private Quests plugin;
@@ -37,8 +39,6 @@ public class Settings {
     private int topLimit = 150;
     private boolean translateNames = false;
     private boolean translateSubCommands = false;
-    private boolean useCompass = true;
-    private boolean useGPS = true;
     
     public Settings(Quests plugin) {
         this.plugin = plugin;
@@ -134,18 +134,6 @@ public class Settings {
     public void setTopLimit(int topLimit) {
         this.topLimit = topLimit;
     }
-    /**
-     * @deprecated As of release 2.6.4, use {@link #canTranslateNames()}
-     */
-    public boolean canTranslateItems() {
-        return translateNames;
-    }
-    /**
-     * @deprecated As of release 2.6.4, use {@link #setTranslateNames()}
-     */
-    public void setTranslateItems(boolean translateItems) {
-        this.translateNames = translateItems;
-    }
     public boolean canTranslateNames() {
         return translateNames;
     }
@@ -157,18 +145,6 @@ public class Settings {
     }
     public void setTranslateSubCommands(boolean translateSubCommands) {
         this.translateSubCommands = translateSubCommands;
-    }
-    public boolean canUseCompass() {
-        return useCompass;
-    }
-    public void setUseCompass(boolean useCompass) {
-        this.useCompass = useCompass;
-    }
-    public boolean canUseGPS() {
-        return useGPS;
-    }
-    public void setUseGPS(boolean useGPS) {
-        this.useGPS = useGPS;
     }
     
     public void init() {
@@ -182,9 +158,9 @@ public class Settings {
         killDelay = config.getInt("kill-delay", 600);
         if (config.getString("language").equalsIgnoreCase("en")) {
             //Legacy
-            plugin.getLang().setISO("en-US");
+            Lang.setISO("en-US");
         } else {
-            plugin.getLang().setISO(config.getString("language", "en-US"));
+            Lang.setISO(config.getString("language", "en-US"));
         }
         maxQuests = config.getInt("max-quests", maxQuests);
         npcEffects = config.getBoolean("npc-effects.enabled", true);
@@ -196,8 +172,6 @@ public class Settings {
         topLimit = config.getInt("top-limit", 150);
         translateNames = config.getBoolean("translate-names", true);
         translateSubCommands = config.getBoolean("translate-subcommands", false);
-        useCompass = config.getBoolean("use-compass", true);
-        useGPS = config.getBoolean("use-gps-plugin", true);
         try {
             config.save(new File(plugin.getDataFolder(), "config.yml"));
         } catch (IOException e) {
